@@ -13,6 +13,7 @@ from config import load_config
 from geometry import GridCalculator
 from shortcuts import ShortcutManager
 from window_manager import WaylandWindowManager
+from tray import TrayWidget
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,6 +31,8 @@ class WindowSnapManager:
         self.config = load_config()
         self.grid = GridCalculator()
         self.running = True
+        self.tray = None
+        self.snap_callbacks = {}
 
     def snap_quarter(self, position: str) -> bool:
         """Snap to quarter position."""
@@ -108,9 +111,9 @@ class WindowSnapManager:
         rect = self.grid.maximize(monitor)
         return self.wm.snap_window(rect)
 
-    def register_shortcuts(self):
-        """Register all keyboard shortcuts."""
-        callbacks = {
+    def setup_callbacks(self):
+        """Set up snap callbacks for both keyboard and tray."""
+        self.snap_callbacks = {
             "quarter_top_left": lambda: self.snap_quarter("top_left"),
             "quarter_top_right": lambda: self.snap_quarter("top_right"),
             "quarter_bottom_left": lambda: self.snap_quarter("bottom_left"),
@@ -147,7 +150,9 @@ class WindowSnapManager:
             "maximize": lambda: self.snap_maximize(),
         }
 
-        for action, callback in callbacks.items():
+    def register_shortcuts(self):
+        """Register all keyboard shortcuts."""
+        for action, callback in self.snap_callbacks.items():
             shortcut = self.config.get(action)
             if shortcut:
                 self.shortcuts.register(shortcut, callback)
@@ -157,12 +162,20 @@ class WindowSnapManager:
     def run(self):
         """Run the application."""
         logger.info("Starting Window Snap Manager")
+
+        self.setup_callbacks()
         self.register_shortcuts()
+        self.shortcuts.start()
+
+        # Create system tray widget
+        self.tray = TrayWidget(self.snap_callbacks)
+        logger.info("System tray widget created")
 
         # Set up signal handlers
         def handle_signal(signum, frame):
             logger.info("Received signal, shutting down")
             self.running = False
+            self.shortcuts.stop()
             Gtk.main_quit()
 
         signal.signal(signal.SIGINT, handle_signal)
@@ -173,6 +186,8 @@ class WindowSnapManager:
             Gtk.main()
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
+        finally:
+            self.shortcuts.stop()
 
 
 def main():
